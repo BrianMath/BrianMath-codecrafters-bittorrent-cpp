@@ -14,11 +14,20 @@ json decode_bencoded_value(const std::string& encoded_value) {
 		size_t colon_index = encoded_value.find(':');
 		if (colon_index != std::string::npos) {
 			std::string number_string = encoded_value.substr(0, colon_index);
-			int64_t number = std::atoll(number_string.c_str());
+			int64_t number = std::stoll(number_string);
 			std::string str = encoded_value.substr(colon_index + 1, number);
 			return json(str);
 		} else {
-			throw std::runtime_error("Invalid encoded value: " + encoded_value);
+			throw std::runtime_error("Invalid encoded string: missing colon > " + encoded_value);
+		}
+	} else if (encoded_value[0] == 'i' && encoded_value.back() == 'e') {
+		// Examples: "i42e" -> 42 | "i-123e" -> -123
+		if (encoded_value.length() > 2) {
+			std::string str = encoded_value.substr(1, encoded_value.length() - 2);
+			int64_t num = std::stoll(str);
+			return json(num);
+		} else {
+			throw std::runtime_error("Invalid encoded integer: too short > " + encoded_value);
 		}
 	} else {
 		throw std::runtime_error("Unhandled encoded value: " + encoded_value);
@@ -42,7 +51,7 @@ int main(int argc, char* argv[]) {
 			std::cerr << "Usage: " << argv[0] << " decode <encoded_value>" << std::endl;
 			return 1;
 		}
-		
+
 		std::string encoded_value = argv[2];
 		json decoded_value = decode_bencoded_value(encoded_value);
 		std::cout << decoded_value.dump() << std::endl;
