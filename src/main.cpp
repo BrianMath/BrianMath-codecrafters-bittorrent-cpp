@@ -3,33 +3,123 @@
 #include <vector>
 #include <cctype>
 #include <cstdlib>
+#include <variant>
 
 #include "lib/nlohmann/json.hpp"
 
 using json = nlohmann::json;
 
-json decode_bencoded_value(const std::string& encoded_value) {
+json decode_bencoded_value(std::string& encoded_value);
+
+json decode_string(std::string& encoded_value) {
+	size_t colon_index = encoded_value.find(':');
+
+	if (colon_index != std::string::npos) {
+		std::string number_string = encoded_value.substr(0, colon_index);
+		int64_t number = std::stoll(number_string);
+		std::string str = encoded_value.substr(colon_index + 1, number);
+
+		int64_t total_number = number + colon_index + 1;
+		encoded_value = encoded_value.substr(total_number);
+		
+		return json(str);
+	}
+	
+	throw std::runtime_error("Invalid encoded string: missing colon > " + encoded_value);
+}
+
+json decode_integer(std::string& encoded_value) {
+	size_t len = encoded_value.length();
+	if (len <= 2) {
+		throw std::runtime_error("Invalid encoded integer: too short > " + encoded_value);
+	}
+	
+	size_t index_end = 0;
+
+	// Handle invalid numbers, like "i-e" and "iae"
+	if (len < 4) {
+		if (!isdigit(encoded_value[1])) {
+			throw std::runtime_error("Invalid encoded integer: " + encoded_value);
+		}
+	}
+	if (!isdigit(encoded_value[1]) && encoded_value[1] != '-') {
+		throw std::runtime_error("Invalid encoded integer: " + encoded_value);
+	}
+	
+	// Find the 'e' index, if there is
+	for (size_t i = 2; i < len; i++) {
+		if (isdigit(encoded_value[i])) {
+			continue;
+		}
+
+		if (encoded_value[i] == 'e') {
+			index_end = i;
+			break;
+		}
+
+		throw std::runtime_error("Invalid encoded integer: missing 'e' > " + encoded_value);
+	}
+
+	if (!index_end) {
+		throw std::runtime_error("Invalid encoded integer: missing 'e' > " + encoded_value);
+	}
+
+	std::string str = encoded_value.substr(1, index_end-1);
+	int64_t num = std::stoll(str);
+
+	encoded_value = encoded_value.substr(index_end+1, len-index_end-1);
+
+	return json(num);
+}
+
+json decode_list(std::string& encoded_value) {
+	size_t len = encoded_value.length();
+	if (len < 2) {
+		throw std::runtime_error("Invalid encoded list: too short > " + encoded_value);
+	}
+
+	if (encoded_value[1] == 'e') {
+		encoded_value = encoded_value.substr(2);
+		return json::array();
+	}
+
+	// Remove 'l' from start
+	encoded_value = encoded_value.substr(1);
+
+	// Create a temp list with decoded values
+	json temp_list = json::array();
+
+	while (!encoded_value.empty() && encoded_value[0] != 'e') {
+		temp_list.push_back(decode_bencoded_value(encoded_value));
+	}
+
+	if (encoded_value.empty()) {
+		throw std::runtime_error("Invalid encoded list: missing 'e' > " + encoded_value);
+	}
+
+	// Remove remaining 'e' from start
+	encoded_value = encoded_value.substr(1);
+
+	return temp_list;
+}
+
+json decode_bencoded_value(std::string& encoded_value) {
+	/* STRING */
 	if (std::isdigit(encoded_value[0])) {
 		// Example: "5:hello" -> "hello"
-		size_t colon_index = encoded_value.find(':');
-		if (colon_index != std::string::npos) {
-			std::string number_string = encoded_value.substr(0, colon_index);
-			int64_t number = std::stoll(number_string);
-			std::string str = encoded_value.substr(colon_index + 1, number);
-			return json(str);
-		} else {
-			throw std::runtime_error("Invalid encoded string: missing colon > " + encoded_value);
-		}
-	} else if (encoded_value[0] == 'i' && encoded_value.back() == 'e') {
+		return decode_string(encoded_value);
+	}
+	/* INTEGER */
+	else if (encoded_value[0] == 'i') {
 		// Examples: "i42e" -> 42 | "i-123e" -> -123
-		if (encoded_value.length() > 2) {
-			std::string str = encoded_value.substr(1, encoded_value.length() - 2);
-			int64_t num = std::stoll(str);
-			return json(num);
-		} else {
-			throw std::runtime_error("Invalid encoded integer: too short > " + encoded_value);
-		}
-	} else {
+		return decode_integer(encoded_value);
+	}
+	/* LIST */
+	else if (encoded_value[0] == 'l') {
+		// Example: "l5:helloi52ee" -> ["hello",52] | li52e5:helloe -> [52,"hello"]
+		return decode_list(encoded_value);
+	} 
+	else {
 		throw std::runtime_error("Unhandled encoded value: " + encoded_value);
 	}
 }
