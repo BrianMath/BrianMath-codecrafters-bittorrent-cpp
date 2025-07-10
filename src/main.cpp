@@ -103,6 +103,43 @@ json decode_list(std::string& encoded_value) {
 	return temp_list;
 }
 
+json decode_dictionary(std::string& encoded_value) {
+	size_t len = encoded_value.length();
+	if (len < 2) {
+		throw std::runtime_error("Invalid encoded dictionary: too short > " + encoded_value);
+	}
+
+	if (encoded_value[1] == 'e') {
+		encoded_value = "";
+		return json::object();
+	}
+
+	// Remove 'd' from start
+	encoded_value = encoded_value.substr(1);
+
+	// Create a temp dictionary with encoded key/value pairs
+	json temp_dict = json::object();
+	
+	while (!encoded_value.empty() && encoded_value[0] != 'e') {
+		json key = decode_bencoded_value(encoded_value);
+		if (!key.is_string()) {
+			throw std::runtime_error("Invalid encoded dictionary: key must be string > " + encoded_value);
+		}
+
+		json value = decode_bencoded_value(encoded_value);
+		temp_dict[key] = value;
+	}
+
+	if (encoded_value.empty()) {
+		throw std::runtime_error("Invalid encoded dictionary: missing 'e' > " + encoded_value);
+	}
+
+	// Remove remaining 'e' from start
+	encoded_value = encoded_value.substr(1);
+
+	return temp_dict;
+}
+
 json decode_bencoded_value(std::string& encoded_value) {
 	/* STRING */
 	if (std::isdigit(encoded_value[0])) {
@@ -118,7 +155,12 @@ json decode_bencoded_value(std::string& encoded_value) {
 	else if (encoded_value[0] == 'l') {
 		// Example: "l5:helloi52ee" -> ["hello",52] | li52e5:helloe -> [52,"hello"]
 		return decode_list(encoded_value);
-	} 
+	}
+	/* DICTIONARY */
+	else if (encoded_value[0] == 'd') {
+		// Example: "d3:foo3:bar5:helloi52ee" -> {"foo":"bar", "hello":52}
+		return decode_dictionary(encoded_value);
+	}
 	else {
 		throw std::runtime_error("Unhandled encoded value: " + encoded_value);
 	}
