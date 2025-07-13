@@ -3,13 +3,31 @@
 #include <vector>
 #include <cctype>
 #include <cstdlib>
-#include <variant>
+#include <fstream>
+#include <streambuf>
 
 #include "lib/nlohmann/json.hpp"
 
 using json = nlohmann::json;
 
 json decode_bencoded_value(std::string& encoded_value);
+
+json decode_binary(std::string& binary) {
+	size_t colon_index = binary.find(':');
+
+	if (colon_index != std::string::npos) {
+		std::string number_string = binary.substr(0, colon_index);
+		int64_t number = std::stoll(number_string);
+
+		// Just ignore the binary part for now
+		int64_t total_number = number + colon_index + 1;
+		binary = binary.substr(total_number);
+
+		return json(binary);
+	}
+	
+	throw std::runtime_error("Invalid encoded string: missing colon > " + binary);
+}
 
 json decode_string(std::string& encoded_value) {
 	size_t colon_index = encoded_value.find(':');
@@ -126,6 +144,12 @@ json decode_dictionary(std::string& encoded_value) {
 			throw std::runtime_error("Invalid encoded dictionary: key must be string > " + encoded_value);
 		}
 
+		if (key == "pieces") {
+			// Just ignore the binary part for now
+			decode_binary(encoded_value);
+			continue;
+		}
+
 		json value = decode_bencoded_value(encoded_value);
 		temp_dict[key] = value;
 	}
@@ -187,7 +211,30 @@ int main(int argc, char* argv[]) {
 		std::string encoded_value = argv[2];
 		json decoded_value = decode_bencoded_value(encoded_value);
 		std::cout << decoded_value.dump() << std::endl;
-	} else {
+	}
+	else if (command == "info") {
+		if (argc < 3) {
+			std::cerr << "Usage: " << argv[0] << " info <file.torrent>" << std::endl;
+			return 1;
+		}
+
+		std::fstream file(argv[2]);
+		if (!file.is_open()) {
+			std::cerr << "Error: could not read the file \"" << argv[2] << "\"\n";
+			return 1;
+		}
+
+		// Copy the content of the file to a std::string
+		std::string file_content = 
+			{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+
+		// Show info about the file
+		json decoded_value = decode_bencoded_value(file_content);
+
+		std::cout << "Tracker URL: " << (std::string)decoded_value["announce"] << '\n';
+		std::cout << "Length: " << decoded_value["info"]["length"] << '\n';
+	}
+	else {
 		std::cerr << "unknown command: " << command << std::endl;
 		return 1;
 	}
